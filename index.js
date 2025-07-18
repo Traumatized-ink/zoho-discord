@@ -16,8 +16,11 @@ app.post('/webhook/zoho', async (req, res) => {
     console.log('Full payload:', JSON.stringify(emailData, null, 2));
     console.log('=== END DEBUG ===');
     
+    const emailContent = emailData.html || emailData.summary || 'No content available';
+    const cleanContent = emailContent.replace(/<[^>]*>/g, '').trim();
+    
     const discordMessage = {
-      content: `📧 **New Email Received**\n\n**From:** ${emailData.fromAddress}\n**Subject:** ${emailData.subject}\n**Content:** ${emailData.content || 'No content available'}`
+      content: `📧 **New Email Received**\n\n**From:** ${emailData.sender} (${emailData.fromAddress})\n**Subject:** ${emailData.subject}\n**Content:** ${cleanContent}`
     };
 
     await axios.post(process.env.DISCORD_WEBHOOK_URL, discordMessage);
