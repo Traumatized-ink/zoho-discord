@@ -198,6 +198,19 @@ client.once('ready', async () => {
   // Update from addresses on startup
   if (process.env.ZOHO_REFRESH_TOKEN) {
     await updateFromAddresses();
+    
+    // Set up daily refresh (every 24 hours)
+    setInterval(async () => {
+      console.log('🔄 Daily refresh: Updating from addresses...');
+      try {
+        await updateFromAddresses();
+        console.log('✅ Daily refresh completed');
+      } catch (error) {
+        console.error('❌ Daily refresh failed:', error);
+      }
+    }, 24 * 60 * 60 * 1000); // 24 hours in milliseconds
+    
+    console.log('📅 Daily refresh scheduled (every 24 hours)');
   }
 });
 
@@ -471,18 +484,40 @@ app.post('/webhook/zoho', async (req, res) => {
           .setEmoji('💬')
       );
 
-    // Send to Discord using webhook (with embeds and components)
+    // Send initial message via webhook (embeds only, no buttons yet)
     const webhookResponse = await axios.post(process.env.DISCORD_WEBHOOK_URL, {
       embeds: [embed.toJSON()],
-      components: [row.toJSON()]
+      wait: true  // Wait for response to get message ID
     });
 
-    // Store mapping in database
+    // Store mapping in database and let Discord bot add buttons
     const discordMessageId = webhookResponse.data?.id;
     if (discordMessageId) {
       db.run(
         'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
-        [discordMessageId, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject]
+        [discordMessageId, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject],
+        async (err) => {
+          if (!err && client.user) {
+            // Have Discord bot add buttons to the message
+            try {
+              const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
+              const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
+              
+              const channel = await client.channels.fetch(channelId);
+              const message = await channel.messages.fetch(discordMessageId);
+              
+              // Add buttons to the message
+              await message.edit({
+                embeds: message.embeds,
+                components: [row.toJSON()]
+              });
+              
+              console.log('✅ Added interactive buttons to Discord message');
+            } catch (error) {
+              console.error('Error adding buttons to message:', error);
+            }
+          }
+        }
       );
     }
     
