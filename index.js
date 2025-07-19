@@ -55,24 +55,44 @@ async function updateFromAddresses() {
     const accountData = response.data.data[0];
     if (!accountData) return;
 
+    console.log(`Found ${accountData.emailAddress.length} email addresses`);
+    console.log(`Found ${accountData.sendMailDetails.length} send mail details`);
+
     // Clear existing addresses
-    db.run('DELETE FROM from_addresses');
-
-    // Insert email addresses
-    accountData.emailAddress.forEach(email => {
-      db.run(
-        'INSERT OR REPLACE INTO from_addresses (email_address, display_name, is_primary, is_alias) VALUES (?, ?, ?, ?)',
-        [email.mailId, accountData.displayName, email.isPrimary, email.isAlias]
-      );
+    await new Promise((resolve, reject) => {
+      db.run('DELETE FROM from_addresses', (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
 
-    // Insert send mail details with display names
-    accountData.sendMailDetails.forEach(sendMail => {
-      db.run(
-        'UPDATE from_addresses SET display_name = ?, send_mail_id = ? WHERE email_address = ?',
-        [sendMail.displayName, sendMail.sendMailId, sendMail.fromAddress]
-      );
-    });
+    // Insert email addresses with proper async handling
+    for (const email of accountData.emailAddress) {
+      await new Promise((resolve, reject) => {
+        db.run(
+          'INSERT INTO from_addresses (email_address, display_name, is_primary, is_alias) VALUES (?, ?, ?, ?)',
+          [email.mailId, accountData.displayName, email.isPrimary, email.isAlias],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+    }
+
+    // Update with send mail details
+    for (const sendMail of accountData.sendMailDetails) {
+      await new Promise((resolve, reject) => {
+        db.run(
+          'UPDATE from_addresses SET display_name = ?, send_mail_id = ? WHERE email_address = ?',
+          [sendMail.displayName, sendMail.sendMailId, sendMail.fromAddress],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+    }
 
     console.log('✅ Updated from addresses in database');
   } catch (error) {
