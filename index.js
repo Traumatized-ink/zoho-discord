@@ -496,6 +496,10 @@ app.post('/webhook/zoho', async (req, res) => {
       
       // Get channel ID from webhook (this should work with bot permissions)
       try {
+        console.log('🔗 Webhook ID:', webhookId);
+        console.log('🔑 Bot token exists:', !!process.env.DISCORD_BOT_TOKEN);
+        console.log('🔑 Bot token length:', process.env.DISCORD_BOT_TOKEN?.length);
+        
         const webhookInfo = await axios.get(`https://discord.com/api/v10/webhooks/${webhookId}`, {
           headers: {
             'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`
@@ -506,6 +510,8 @@ app.post('/webhook/zoho', async (req, res) => {
         console.log('📍 Got channel ID from webhook:', channelId);
         
         const channel = await client.channels.fetch(channelId);
+        console.log('📢 Fetched channel:', channel.name);
+        
         const message = await channel.send({
           embeds: [embed],
           components: [row]
@@ -521,6 +527,12 @@ app.post('/webhook/zoho', async (req, res) => {
         
       } catch (error) {
         console.error('❌ Error with Discord bot approach:', error.message);
+        if (error.response) {
+          console.error('❌ Response status:', error.response.status);
+          console.error('❌ Response data:', JSON.stringify(error.response.data, null, 2));
+        }
+        console.error('❌ Full error:', error);
+        
         // Fallback to webhook if bot method fails
         console.log('📤 Falling back to webhook...');
         await axios.post(process.env.DISCORD_WEBHOOK_URL, {
