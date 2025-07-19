@@ -501,7 +501,21 @@ app.post('/webhook/zoho', async (req, res) => {
       setTimeout(async () => {
         try {
           const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
-          const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
+          // Discord webhook URL format: https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN
+          // We need to extract channel ID differently - let's get it from the webhook info
+          const webhookPathParts = webhookUrl.pathname.split('/');
+          const webhookId = webhookPathParts[3]; // webhooks/WEBHOOK_ID/token
+          
+          console.log('🔗 Webhook ID:', webhookId);
+          
+          // Get webhook info to find the channel ID
+          const webhookInfo = await axios.get(`https://discord.com/api/webhooks/${webhookId}`, {
+            headers: {
+              'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`
+            }
+          });
+          
+          const channelId = webhookInfo.data.channel_id;
           console.log('📍 Extracted channel ID:', channelId);
           
           const channel = await client.channels.fetch(channelId);
