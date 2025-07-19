@@ -133,9 +133,20 @@ async function smartSelectFromAddress(toAddress) {
   return selected;
 }
 
+// Token caching to avoid rate limits
+let cachedAccessToken = null;
+let tokenExpiresAt = null;
+
 // Zoho API helper functions
 async function getZohoAccessToken() {
   try {
+    // Check if we have a valid cached token
+    if (cachedAccessToken && tokenExpiresAt && Date.now() < tokenExpiresAt) {
+      console.log('🔄 Using cached access token');
+      return cachedAccessToken;
+    }
+    
+    console.log('🔑 Refreshing access token...');
     const response = await axios.post('https://accounts.zoho.com/oauth/v2/token', null, {
       params: {
         refresh_token: process.env.ZOHO_REFRESH_TOKEN,
@@ -144,7 +155,13 @@ async function getZohoAccessToken() {
         grant_type: 'refresh_token'
       }
     });
-    return response.data.access_token;
+    
+    // Cache the token (expires in 1 hour, cache for 55 minutes to be safe)
+    cachedAccessToken = response.data.access_token;
+    tokenExpiresAt = Date.now() + (55 * 60 * 1000); // 55 minutes
+    
+    console.log('✅ New access token cached');
+    return cachedAccessToken;
   } catch (error) {
     console.error('Error getting Zoho access token:', error);
     throw error;
