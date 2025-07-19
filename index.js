@@ -25,6 +25,7 @@ db.serialize(() => {
     zoho_message_id TEXT,
     zoho_account_id TEXT,
     sender_email TEXT,
+    recipient_email TEXT,
     subject TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
@@ -111,17 +112,25 @@ async function getFromAddresses() {
 
 async function smartSelectFromAddress(toAddress) {
   const addresses = await getFromAddresses();
+  console.log(`🔍 Smart address selection for: ${toAddress}`);
+  console.log(`📧 Available addresses: ${addresses.map(a => a.email_address).join(', ')}`);
   
   // Try to match domain
   if (toAddress) {
     const toDomain = toAddress.split('@')[1];
+    console.log(`🌐 Looking for domain match: ${toDomain}`);
     const domainMatch = addresses.find(addr => addr.email_address.includes(toDomain));
-    if (domainMatch) return domainMatch.email_address;
+    if (domainMatch) {
+      console.log(`✅ Found domain match: ${domainMatch.email_address}`);
+      return domainMatch.email_address;
+    }
   }
   
   // Fallback to primary address
   const primary = addresses.find(addr => addr.is_primary);
-  return primary ? primary.email_address : addresses[0]?.email_address;
+  const selected = primary ? primary.email_address : addresses[0]?.email_address;
+  console.log(`🔄 Using fallback address: ${selected}`);
+  return selected;
 }
 
 // Zoho API helper functions
@@ -184,6 +193,9 @@ async function markEmailAsRead(messageId) {
 async function replyToEmail(messageId, fromAddress, toAddress, subject, content) {
   try {
     console.log(`💬 Attempting to reply to email ${messageId}...`);
+    console.log(`📧 Reply details: FROM: ${fromAddress} → TO: ${toAddress}`);
+    console.log(`📧 Message ID type: ${typeof messageId}, value: ${messageId}`);
+    
     const accessToken = await getZohoAccessToken();
     console.log(`🔑 Got access token for reply: ${accessToken?.substring(0, 20)}...`);
     
@@ -199,8 +211,12 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
       content: content?.substring(0, 100) + '...'
     });
     
+    // Ensure message ID is a number (Zoho might expect numeric format)
+    const numericMessageId = parseInt(messageId);
+    console.log(`🔢 Using numeric message ID: ${numericMessageId}`);
+    
     const response = await axios.post(
-      `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${messageId}`,
+      `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${numericMessageId}`,
       requestData,
       {
         headers: {
@@ -287,7 +303,7 @@ client.on('interactionCreate', async interaction => {
         );
       });
 
-      const smartDefault = await smartSelectFromAddress(emailData?.sender_email);
+      const smartDefault = await smartSelectFromAddress(emailData?.recipient_email);
       const defaultAddress = fromAddresses.find(addr => addr.email_address === smartDefault);
 
       // Create dropdown for selecting from address (as a message response)
@@ -329,7 +345,7 @@ client.on('interactionCreate', async interaction => {
         );
       });
 
-      const smartDefault = await smartSelectFromAddress(emailData?.sender_email);
+      const smartDefault = await smartSelectFromAddress(emailData?.recipient_email);
 
       const modal = {
         title: 'Quick Reply',
@@ -440,14 +456,16 @@ client.on('interactionCreate', async interaction => {
         }
       );
     });
+    
+    console.log(`📊 Database lookup for message ${zohoMessageId}:`, emailData);
 
     if (emailData) {
       // Send reply
       console.log(`📤 Sending reply to message ${zohoMessageId} from ${fromAddress}`);
       await replyToEmail(
         zohoMessageId,
-        fromAddress, // Use selected from address
-        emailData.sender_email,
+        fromAddress, // Use selected from address (this should be a Zoho address)
+        emailData.sender_email, // Send TO the original sender
         emailData.subject,
         replyContent
       );
@@ -604,9 +622,10 @@ app.post('/webhook/zoho', async (req, res) => {
         console.log('✅ Message sent directly via Discord bot with buttons!');
         
         // Store mapping in database
+        const cleanRecipientEmail = emailData.toAddress.replace(/[<>]/g, ''); // Remove angle brackets
         db.run(
-          'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
-          [message.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject]
+          'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, recipient_email, subject) VALUES (?, ?, ?, ?, ?, ?)',
+          [message.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, cleanRecipientEmail, emailData.subject]
         );
         
       } catch (error) {
