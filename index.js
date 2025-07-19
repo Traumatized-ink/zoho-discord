@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } = require('discord.js');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
@@ -17,7 +17,7 @@ const client = new Client({
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'email_mapping.db');
 const db = new sqlite3.Database(dbPath);
 
-// Create table for email mappings
+// Create tables
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS email_mappings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,9 +28,81 @@ db.serialize(() => {
     subject TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  
+  db.run(`CREATE TABLE IF NOT EXISTS from_addresses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_address TEXT UNIQUE,
+    display_name TEXT,
+    is_primary BOOLEAN DEFAULT 0,
+    is_alias BOOLEAN DEFAULT 0,
+    send_mail_id TEXT,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
 });
 
 app.use(express.json());
+
+// From address management functions
+async function updateFromAddresses() {
+  try {
+    const accessToken = await getZohoAccessToken();
+    const response = await axios.get('https://mail.zoho.com/api/accounts', {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`
+      }
+    });
+
+    const accountData = response.data.data[0];
+    if (!accountData) return;
+
+    // Clear existing addresses
+    db.run('DELETE FROM from_addresses');
+
+    // Insert email addresses
+    accountData.emailAddress.forEach(email => {
+      db.run(
+        'INSERT OR REPLACE INTO from_addresses (email_address, display_name, is_primary, is_alias) VALUES (?, ?, ?, ?)',
+        [email.mailId, accountData.displayName, email.isPrimary, email.isAlias]
+      );
+    });
+
+    // Insert send mail details with display names
+    accountData.sendMailDetails.forEach(sendMail => {
+      db.run(
+        'UPDATE from_addresses SET display_name = ?, send_mail_id = ? WHERE email_address = ?',
+        [sendMail.displayName, sendMail.sendMailId, sendMail.fromAddress]
+      );
+    });
+
+    console.log('✅ Updated from addresses in database');
+  } catch (error) {
+    console.error('Error updating from addresses:', error);
+  }
+}
+
+async function getFromAddresses() {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT * FROM from_addresses ORDER BY is_primary DESC, email_address ASC', (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+async function smartSelectFromAddress(toAddress) {
+  const addresses = await getFromAddresses();
+  
+  // Try to match domain
+  if (toAddress) {
+    const toDomain = toAddress.split('@')[1];
+    const domainMatch = addresses.find(addr => addr.email_address.includes(toDomain));
+    if (domainMatch) return domainMatch.email_address;
+  }
+  
+  // Fallback to primary address
+  const primary = addresses.find(addr => addr.is_primary);
+  return primary ? primary.email_address : addresses[0]?.email_address;
+}
 
 // Zoho API helper functions
 async function getZohoAccessToken() {
@@ -100,8 +172,13 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
 }
 
 // Discord bot event handlers
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Discord bot logged in as ${client.user.tag}!`);
+  
+  // Update from addresses on startup
+  if (process.env.ZOHO_REFRESH_TOKEN) {
+    await updateFromAddresses();
+  }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -124,10 +201,68 @@ client.on('interactionCreate', async interaction => {
       });
 
     } else if (action === 'reply') {
-      // Show modal for reply
+      // Get available from addresses
+      const fromAddresses = await getFromAddresses();
+      
+      // Get email details to suggest smart default
+      const emailData = await new Promise((resolve, reject) => {
+        db.get(
+          'SELECT * FROM email_mappings WHERE zoho_message_id = ?',
+          [zohoMessageId],
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          }
+        );
+      });
+
+      const smartDefault = await smartSelectFromAddress(emailData?.sender_email);
+      const defaultAddress = fromAddresses.find(addr => addr.email_address === smartDefault);
+
+      // Create dropdown for selecting from address (as a message response)
+      const fromOptions = fromAddresses.slice(0, 25).map(addr => ({
+        label: `${addr.display_name} <${addr.email_address}>`,
+        value: addr.email_address,
+        default: addr.email_address === smartDefault
+      }));
+
+      const selectRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`replyquick_${zohoMessageId}`)
+            .setLabel(`Quick Reply (${defaultAddress?.display_name})`)
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('⚡'),
+          new ButtonBuilder()
+            .setCustomId(`replychoose_${zohoMessageId}`)
+            .setLabel('Choose From Address')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('📧')
+        );
+
+      await interaction.reply({
+        content: `**Reply Options:**\n📧 **Quick Reply** will use: **${defaultAddress?.display_name}** <${smartDefault}>\n📧 **Choose From Address** to select a different email address`,
+        components: [selectRow],
+        ephemeral: true
+      });
+    } else if (action === 'replyquick') {
+      // Quick reply with smart default
+      const emailData = await new Promise((resolve, reject) => {
+        db.get(
+          'SELECT * FROM email_mappings WHERE zoho_message_id = ?',
+          [zohoMessageId],
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          }
+        );
+      });
+
+      const smartDefault = await smartSelectFromAddress(emailData?.sender_email);
+
       const modal = {
-        title: 'Reply to Email',
-        custom_id: `reply_modal_${zohoMessageId}`,
+        title: 'Quick Reply',
+        custom_id: `quickreply_modal_${zohoMessageId}_${smartDefault}`,
         components: [
           {
             type: 1,
@@ -147,6 +282,27 @@ client.on('interactionCreate', async interaction => {
       };
       
       await interaction.showModal(modal);
+    } else if (action === 'replychoose') {
+      // Show address selection dropdown
+      const fromAddresses = await getFromAddresses();
+      
+      const fromOptions = fromAddresses.slice(0, 25).map(addr => ({
+        label: `${addr.display_name} <${addr.email_address}>`,
+        value: addr.email_address
+      }));
+
+      const selectMenu = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`selectfrom_${zohoMessageId}`)
+            .setPlaceholder('Choose email address to reply from')
+            .addOptions(fromOptions)
+        );
+
+      await interaction.update({
+        content: '📧 **Choose which email address to reply from:**',
+        components: [selectMenu]
+      });
     }
   } catch (error) {
     console.error('Error handling interaction:', error);
@@ -157,10 +313,48 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+// Handle select menu interactions
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isStringSelectMenu()) return;
+
+  const [action, zohoMessageId] = interaction.customId.split('_');
+
+  if (action === 'selectfrom') {
+    const selectedFromAddress = interaction.values[0];
+    
+    const modal = {
+      title: 'Reply to Email',
+      custom_id: `customreply_modal_${zohoMessageId}_${selectedFromAddress}`,
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 4,
+              custom_id: 'reply_content',
+              label: 'Your Reply',
+              style: 2,
+              placeholder: 'Type your reply here...',
+              required: true,
+              max_length: 2000
+            }
+          ]
+        }
+      ]
+    };
+    
+    await interaction.showModal(modal);
+  }
+});
+
 client.on('interactionCreate', async interaction => {
   if (!interaction.isModalSubmit()) return;
 
-  const [, , zohoMessageId] = interaction.customId.split('_');
+  const modalParts = interaction.customId.split('_');
+  const modalType = modalParts[0]; // 'quickreply' or 'customreply'
+  const zohoMessageId = modalParts[2];
+  const fromAddress = modalParts[3];
+  
   const replyContent = interaction.fields.getTextInputValue('reply_content');
 
   try {
@@ -179,14 +373,28 @@ client.on('interactionCreate', async interaction => {
     if (emailData) {
       await replyToEmail(
         zohoMessageId,
-        process.env.ZOHO_FROM_ADDRESS || emailData.toAddress, // You'll need to set this
+        fromAddress, // Use selected from address
         emailData.sender_email,
         emailData.subject,
         replyContent
       );
 
+      // Get display name for the selected from address
+      const fromAddressData = await new Promise((resolve, reject) => {
+        db.get(
+          'SELECT display_name FROM from_addresses WHERE email_address = ?',
+          [fromAddress],
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          }
+        );
+      });
+
+      const displayName = fromAddressData?.display_name || 'Unknown';
+
       await interaction.reply({
-        content: '✅ Reply sent successfully!',
+        content: `✅ Reply sent successfully from **${displayName}** <${fromAddress}>!`,
         ephemeral: true
       });
     } else {
@@ -267,6 +475,28 @@ app.post('/webhook/zoho', async (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
+});
+
+// Route to refresh and view from addresses
+app.get('/from-addresses', async (req, res) => {
+  try {
+    await updateFromAddresses();
+    const addresses = await getFromAddresses();
+    
+    res.json({
+      message: 'From addresses updated successfully',
+      count: addresses.length,
+      addresses: addresses.map(addr => ({
+        email: addr.email_address,
+        displayName: addr.display_name,
+        isPrimary: !!addr.is_primary,
+        isAlias: !!addr.is_alias
+      }))
+    });
+  } catch (error) {
+    console.error('Error managing from addresses:', error);
+    res.json({ error: error.message });
+  }
 });
 
 // Helper route to get Zoho Account ID
