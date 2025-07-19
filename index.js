@@ -486,65 +486,60 @@ app.post('/webhook/zoho', async (req, res) => {
 
     // Send initial message via webhook (embeds only, no buttons yet)
     console.log('📤 Sending message to Discord webhook...');
-    const webhookResponse = await axios.post(process.env.DISCORD_WEBHOOK_URL, {
-      embeds: [embed.toJSON()],
-      wait: true  // Wait for response to get message ID
+    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+      embeds: [embed.toJSON()]
     });
 
-    console.log('📨 Webhook response status:', webhookResponse.status);
-    console.log('📨 Webhook response data:', JSON.stringify(webhookResponse.data, null, 2));
+    console.log('✅ Message sent to Discord via webhook');
 
-    // Store mapping in database and let Discord bot add buttons
-    const discordMessageId = webhookResponse.data?.id;
-    console.log('🆔 Discord message ID extracted:', discordMessageId);
-    
-    if (discordMessageId) {
-      console.log('✅ Message ID found, proceeding to add buttons...');
-      db.run(
-        'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
-        [discordMessageId, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject],
-        async (err) => {
-          if (err) {
-            console.error('Database error:', err);
-            return;
-          }
+    // Store mapping and add buttons using Discord bot
+    // We'll find the message by looking for recent messages
+    if (client.user) {
+      console.log('🔧 Bot will add buttons to the latest message...');
+      
+      // Give Discord a moment to process the webhook
+      setTimeout(async () => {
+        try {
+          const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
+          const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
+          console.log('📍 Extracted channel ID:', channelId);
           
-          console.log('🔧 Attempting to add buttons to Discord message...');
-          console.log('Discord bot ready:', !!client.user);
-          console.log('Discord message ID:', discordMessageId);
+          const channel = await client.channels.fetch(channelId);
+          console.log('📢 Fetched channel:', channel.name);
           
-          if (!client.user) {
-            console.error('❌ Discord bot not ready yet');
-            return;
-          }
+          // Get recent messages and find the one that matches our email
+          const messages = await channel.messages.fetch({ limit: 5 });
+          const recentMessage = messages.find(msg => 
+            msg.embeds.length > 0 && 
+            msg.embeds[0].title === '📧 New Email Received' &&
+            msg.embeds[0].fields.find(field => field.name === 'Subject' && field.value === emailData.subject)
+          );
           
-          try {
-            const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
-            const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
-            console.log('📍 Extracted channel ID:', channelId);
+          if (recentMessage) {
+            console.log('💬 Found matching message:', recentMessage.id);
             
-            const channel = await client.channels.fetch(channelId);
-            console.log('📢 Fetched channel:', channel.name);
-            
-            const message = await channel.messages.fetch(discordMessageId);
-            console.log('💬 Fetched message:', message.id);
+            // Store mapping in database
+            db.run(
+              'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
+              [recentMessage.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject]
+            );
             
             // Add buttons to the message
-            await message.edit({
-              embeds: message.embeds,
+            await recentMessage.edit({
+              embeds: recentMessage.embeds,
               components: [row.toJSON()]
             });
             
             console.log('✅ Added interactive buttons to Discord message');
-          } catch (error) {
-            console.error('❌ Error adding buttons to message:', error.message);
-            console.error('Full error:', error);
+          } else {
+            console.log('❌ Could not find matching Discord message');
           }
+        } catch (error) {
+          console.error('❌ Error adding buttons to message:', error.message);
         }
-      );
+      }, 1000); // Wait 1 second for Discord to process the webhook
     } else {
-      console.log('❌ No Discord message ID found - buttons cannot be added');
-      console.log('Webhook response keys:', Object.keys(webhookResponse.data || {}));
+      console.log('❌ Discord bot not ready - buttons cannot be added');
     }
     
     res.status(200).json({ success: true });
