@@ -49,12 +49,19 @@ npm install
 4. Enable these permissions:
    - ✅ Send Messages
    - ✅ Read Message History
+   - ✅ Manage Messages (required to add buttons to webhook messages)
+   - ✅ Use External Emojis (for button emojis)
    - ✅ Use Slash Commands
 
 #### 2.3 Invite Bot to Server
 1. Go to **"OAuth2"** → **"URL Generator"**
 2. Select scopes: **"bot"**
-3. Select permissions: **Send Messages**, **Read Message History**, **Use Slash Commands**
+3. Select permissions: 
+   - **Send Messages**
+   - **Read Message History** 
+   - **Manage Messages**
+   - **Use External Emojis**
+   - **Use Slash Commands**
 4. Copy the generated URL and open it in browser
 5. Select your Discord server and authorize
 
@@ -216,10 +223,12 @@ zoho-discord/
 - Re-run OAuth flow with broader scopes
 - Check that Zoho API application has correct redirect URI
 
-**3. Discord bot not responding**
+**3. Discord bot not responding or buttons not appearing**
 - Verify bot token is correct
-- Ensure bot has proper permissions in Discord server
+- Ensure bot has **Manage Messages** permission (required for interactive buttons)
+- Ensure bot has **Use External Emojis** permission  
 - Check bot is invited to correct server
+- Look for "✅ Added interactive buttons to Discord message" in logs
 
 **4. Emails not appearing in Discord**
 - Verify Zoho webhook URL is correct

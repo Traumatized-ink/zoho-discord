@@ -485,14 +485,21 @@ app.post('/webhook/zoho', async (req, res) => {
       );
 
     // Send initial message via webhook (embeds only, no buttons yet)
+    console.log('📤 Sending message to Discord webhook...');
     const webhookResponse = await axios.post(process.env.DISCORD_WEBHOOK_URL, {
       embeds: [embed.toJSON()],
       wait: true  // Wait for response to get message ID
     });
 
+    console.log('📨 Webhook response status:', webhookResponse.status);
+    console.log('📨 Webhook response data:', JSON.stringify(webhookResponse.data, null, 2));
+
     // Store mapping in database and let Discord bot add buttons
     const discordMessageId = webhookResponse.data?.id;
+    console.log('🆔 Discord message ID extracted:', discordMessageId);
+    
     if (discordMessageId) {
+      console.log('✅ Message ID found, proceeding to add buttons...');
       db.run(
         'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
         [discordMessageId, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject],
@@ -535,6 +542,9 @@ app.post('/webhook/zoho', async (req, res) => {
           }
         }
       );
+    } else {
+      console.log('❌ No Discord message ID found - buttons cannot be added');
+      console.log('Webhook response keys:', Object.keys(webhookResponse.data || {}));
     }
     
     res.status(200).json({ success: true });
