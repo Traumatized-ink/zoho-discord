@@ -211,13 +211,25 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
       content: content?.substring(0, 100) + '...'
     });
     
-    // Ensure message ID is a number (Zoho might expect numeric format)
-    const numericMessageId = parseInt(messageId);
-    console.log(`🔢 Using numeric message ID: ${numericMessageId}`);
+    // Use Send Mail API with in_reply_to parameter for replies
+    const requestDataWithReply = {
+      ...requestData,
+      in_reply_to: {
+        message_id: messageId,
+        owner: {
+          id: process.env.ZOHO_ACCOUNT_ID
+        }
+      }
+    };
+    
+    console.log(`📤 Using Send Mail API with in_reply_to:`, {
+      ...requestDataWithReply,
+      content: requestDataWithReply.content?.substring(0, 100) + '...'
+    });
     
     const response = await axios.post(
-      `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${numericMessageId}`,
-      requestData,
+      `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages`,
+      requestDataWithReply,
       {
         headers: {
           'Authorization': `Zoho-oauthtoken ${accessToken}`,
