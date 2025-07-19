@@ -144,13 +144,19 @@ async function getZohoAccessToken() {
 
 async function markEmailAsRead(messageId) {
   try {
+    console.log(`📖 Attempting to mark email ${messageId} as read...`);
     const accessToken = await getZohoAccessToken();
+    console.log(`🔑 Got access token: ${accessToken?.substring(0, 20)}...`);
+    
+    const requestData = {
+      mode: 'markAsRead',
+      messageId: [parseInt(messageId)]
+    };
+    console.log(`📤 Sending mark as read request:`, requestData);
+    
     const response = await axios.put(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/updatemessage`,
-      {
-        mode: 'markAsRead',
-        messageId: [parseInt(messageId)]
-      },
+      requestData,
       {
         headers: {
           'Authorization': `Zoho-oauthtoken ${accessToken}`,
@@ -158,25 +164,44 @@ async function markEmailAsRead(messageId) {
         }
       }
     );
+    
+    console.log(`✅ Mark as read response:`, {
+      status: response.status,
+      data: response.data
+    });
     return response.data;
   } catch (error) {
-    console.error('Error marking email as read:', error);
+    console.error('❌ Error marking email as read:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      messageId: messageId
+    });
     throw error;
   }
 }
 
 async function replyToEmail(messageId, fromAddress, toAddress, subject, content) {
   try {
+    console.log(`💬 Attempting to reply to email ${messageId}...`);
     const accessToken = await getZohoAccessToken();
+    console.log(`🔑 Got access token for reply: ${accessToken?.substring(0, 20)}...`);
+    
+    const requestData = {
+      fromAddress,
+      toAddress,
+      action: 'Reply',
+      subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+      content
+    };
+    console.log(`📤 Sending reply request:`, {
+      ...requestData,
+      content: content?.substring(0, 100) + '...'
+    });
+    
     const response = await axios.post(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${messageId}`,
-      {
-        fromAddress,
-        toAddress,
-        action: 'Reply',
-        subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-        content
-      },
+      requestData,
       {
         headers: {
           'Authorization': `Zoho-oauthtoken ${accessToken}`,
@@ -184,9 +209,21 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
         }
       }
     );
+    
+    console.log(`✅ Reply response:`, {
+      status: response.status,
+      data: response.data
+    });
     return response.data;
   } catch (error) {
-    console.error('Error replying to email:', error);
+    console.error('❌ Error replying to email:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      messageId: messageId,
+      fromAddress,
+      toAddress
+    });
     throw error;
   }
 }
@@ -405,6 +442,8 @@ client.on('interactionCreate', async interaction => {
     });
 
     if (emailData) {
+      // Send reply
+      console.log(`📤 Sending reply to message ${zohoMessageId} from ${fromAddress}`);
       await replyToEmail(
         zohoMessageId,
         fromAddress, // Use selected from address
@@ -412,6 +451,30 @@ client.on('interactionCreate', async interaction => {
         emailData.subject,
         replyContent
       );
+      console.log(`✅ Reply sent successfully`);
+
+      // Mark email as read (since replying implies reading)
+      console.log(`📖 Auto-marking email ${zohoMessageId} as read after reply`);
+      try {
+        await markEmailAsRead(zohoMessageId);
+        console.log(`✅ Email auto-marked as read after reply`);
+        
+        // Update the original Discord message to show it's been read
+        const originalMessage = await interaction.client.channels.cache.get(process.env.DISCORD_CHANNEL_ID)?.messages.fetch(emailData.discord_message_id);
+        if (originalMessage) {
+          const embed = EmbedBuilder.from(originalMessage.embeds[0])
+            .setColor(0x00ff00)
+            .setFooter({ text: '✅ Replied and marked as read' });
+          
+          await originalMessage.edit({
+            embeds: [embed],
+            components: [] // Remove buttons since it's now read
+          });
+        }
+      } catch (markReadError) {
+        console.error('⚠️ Failed to auto-mark email as read after reply:', markReadError);
+        // Don't fail the reply if mark as read fails
+      }
 
       // Get display name for the selected from address
       const fromAddressData = await new Promise((resolve, reject) => {
@@ -428,7 +491,7 @@ client.on('interactionCreate', async interaction => {
       const displayName = fromAddressData?.display_name || 'Unknown';
 
       await interaction.reply({
-        content: `✅ Reply sent successfully from **${displayName}** <${fromAddress}>!`,
+        content: `✅ Reply sent successfully from **${displayName}** <${fromAddress}>!\n📖 Email automatically marked as read.`,
         ephemeral: true
       });
     } else {
@@ -439,8 +502,16 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     console.error('Error sending reply:', error);
+    console.error('Reply error details:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      zohoMessageId,
+      fromAddress,
+      replyContent: replyContent?.substring(0, 100) + '...'
+    });
     await interaction.reply({
-      content: '❌ Error sending reply.',
+      content: `❌ Error sending reply: ${error.message}`,
       ephemeral: true
     });
   }
