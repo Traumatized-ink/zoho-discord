@@ -214,6 +214,7 @@ client.once('ready', async () => {
   }
 });
 
+
 client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
 
@@ -484,76 +485,54 @@ app.post('/webhook/zoho', async (req, res) => {
           .setEmoji('💬')
       );
 
-    // Send initial message via webhook (embeds only, no buttons yet)
-    console.log('📤 Sending message to Discord webhook...');
-    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
-      embeds: [embed.toJSON()]
-    });
-
-    console.log('✅ Message sent to Discord via webhook');
-
-    // Store mapping and add buttons using Discord bot
-    // We'll find the message by looking for recent messages
+    // Send message directly via Discord bot (much simpler!)
     if (client.user) {
-      console.log('🔧 Bot will add buttons to the latest message...');
+      console.log('📤 Sending message via Discord bot...');
       
-      // Give Discord a moment to process the webhook
-      setTimeout(async () => {
-        try {
-          const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
-          // Discord webhook URL format: https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN
-          // We need to extract channel ID differently - let's get it from the webhook info
-          const webhookPathParts = webhookUrl.pathname.split('/');
-          const webhookId = webhookPathParts[3]; // webhooks/WEBHOOK_ID/token
-          
-          console.log('🔗 Webhook ID:', webhookId);
-          
-          // Get webhook info to find the channel ID
-          const webhookInfo = await axios.get(`https://discord.com/api/webhooks/${webhookId}`, {
-            headers: {
-              'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`
-            }
-          });
-          
-          const channelId = webhookInfo.data.channel_id;
-          console.log('📍 Extracted channel ID:', channelId);
-          
-          const channel = await client.channels.fetch(channelId);
-          console.log('📢 Fetched channel:', channel.name);
-          
-          // Get recent messages and find the one that matches our email
-          const messages = await channel.messages.fetch({ limit: 5 });
-          const recentMessage = messages.find(msg => 
-            msg.embeds.length > 0 && 
-            msg.embeds[0].title === '📧 New Email Received' &&
-            msg.embeds[0].fields.find(field => field.name === 'Subject' && field.value === emailData.subject)
-          );
-          
-          if (recentMessage) {
-            console.log('💬 Found matching message:', recentMessage.id);
-            
-            // Store mapping in database
-            db.run(
-              'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
-              [recentMessage.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject]
-            );
-            
-            // Add buttons to the message
-            await recentMessage.edit({
-              embeds: recentMessage.embeds,
-              components: [row.toJSON()]
-            });
-            
-            console.log('✅ Added interactive buttons to Discord message');
-          } else {
-            console.log('❌ Could not find matching Discord message');
+      // Extract channel ID from webhook URL
+      const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
+      const pathParts = webhookUrl.pathname.split('/');
+      const webhookId = pathParts[3];
+      
+      // Get channel ID from webhook (this should work with bot permissions)
+      try {
+        const webhookInfo = await axios.get(`https://discord.com/api/v10/webhooks/${webhookId}`, {
+          headers: {
+            'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`
           }
-        } catch (error) {
-          console.error('❌ Error adding buttons to message:', error.message);
-        }
-      }, 1000); // Wait 1 second for Discord to process the webhook
+        });
+        
+        const channelId = webhookInfo.data.channel_id;
+        console.log('📍 Got channel ID from webhook:', channelId);
+        
+        const channel = await client.channels.fetch(channelId);
+        const message = await channel.send({
+          embeds: [embed],
+          components: [row]
+        });
+        
+        console.log('✅ Message sent directly via Discord bot with buttons!');
+        
+        // Store mapping in database
+        db.run(
+          'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
+          [message.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject]
+        );
+        
+      } catch (error) {
+        console.error('❌ Error with Discord bot approach:', error.message);
+        // Fallback to webhook if bot method fails
+        console.log('📤 Falling back to webhook...');
+        await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+          embeds: [embed.toJSON()]
+        });
+        console.log('✅ Message sent via webhook (no buttons)');
+      }
     } else {
-      console.log('❌ Discord bot not ready - buttons cannot be added');
+      console.log('❌ Discord bot not ready, using webhook fallback');
+      await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+        embeds: [embed.toJSON()]
+      });
     }
     
     res.status(200).json({ success: true });
