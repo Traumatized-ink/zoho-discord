@@ -199,37 +199,22 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
     const accessToken = await getZohoAccessToken();
     console.log(`🔑 Got access token for reply: ${accessToken?.substring(0, 20)}...`);
     
+    // Use simple Send Mail API format (no action or in_reply_to parameters)
     const requestData = {
       fromAddress,
       toAddress,
-      action: 'reply',
       subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
       content
     };
-    console.log(`📤 Sending reply request:`, {
+    
+    console.log(`📤 Sending email via Send Mail API:`, {
       ...requestData,
       content: content?.substring(0, 100) + '...'
     });
     
-    // Use Send Mail API with in_reply_to parameter for replies
-    const requestDataWithReply = {
-      ...requestData,
-      in_reply_to: {
-        message_id: messageId,
-        owner: {
-          id: process.env.ZOHO_ACCOUNT_ID
-        }
-      }
-    };
-    
-    console.log(`📤 Using Send Mail API with in_reply_to:`, {
-      ...requestDataWithReply,
-      content: requestDataWithReply.content?.substring(0, 100) + '...'
-    });
-    
     const response = await axios.post(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages`,
-      requestDataWithReply,
+      requestData,
       {
         headers: {
           'Authorization': `Zoho-oauthtoken ${accessToken}`,
