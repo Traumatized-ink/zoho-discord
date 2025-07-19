@@ -4,3 +4,17 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Claude/AI development context files
+CLAUDE.md
+SESSION_CONTEXT.md
+CURRENT_STATUS.md
+HTML_PARSING_ISSUE.md
+ENHANCEMENT_PLAN.md
+TODO.md
+ZOHO_PAYLOAD_REFERENCE.md
+
+# SQLite database
+data/
+*.db
+*.sqlite
