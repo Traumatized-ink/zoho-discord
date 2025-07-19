@@ -14,7 +14,8 @@ const client = new Client({
 });
 
 // Initialize SQLite database
-const db = new sqlite3.Database(path.join(__dirname, 'email_mapping.db'));
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'data', 'email_mapping.db');
+const db = new sqlite3.Database(dbPath);
 
 // Create table for email mappings
 db.serialize(() => {
