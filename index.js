@@ -269,6 +269,34 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
+// Helper route to get Zoho Account ID
+app.get('/get-account-id', async (req, res) => {
+  try {
+    if (!process.env.ZOHO_REFRESH_TOKEN) {
+      return res.json({ error: 'ZOHO_REFRESH_TOKEN not set' });
+    }
+
+    const accessToken = await getZohoAccessToken();
+    const response = await axios.get('https://mail.zoho.com/api/accounts', {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`
+      }
+    });
+
+    const accounts = response.data.data || [];
+    
+    res.json({
+      accounts: accounts,
+      accountId: accounts[0]?.accountId,
+      message: accounts[0] ? `Add this to Coolify: ZOHO_ACCOUNT_ID=${accounts[0].accountId}` : 'No accounts found'
+    });
+
+  } catch (error) {
+    console.error('Error getting account ID:', error.response?.data || error.message);
+    res.json({ error: error.response?.data || error.message });
+  }
+});
+
 // Helper function to get base URL
 function getBaseUrl(req) {
   // Try env variable first, then detect from request
@@ -286,7 +314,7 @@ function getBaseUrl(req) {
 app.get('/oauth/start', (req, res) => {
   const baseUrl = getBaseUrl(req);
   const redirectUri = `${baseUrl}/oauth/callback`;
-  const authUrl = `https://accounts.zoho.com/oauth/v2/auth?scope=ZohoMail.messages.ALL&client_id=${process.env.ZOHO_CLIENT_ID}&response_type=code&redirect_uri=${redirectUri}&access_type=offline`;
+  const authUrl = `https://accounts.zoho.com/oauth/v2/auth?scope=ZohoMail.messages.ALL,ZohoMail.accounts.READ&client_id=${process.env.ZOHO_CLIENT_ID}&response_type=code&redirect_uri=${redirectUri}&access_type=offline`;
   
   console.log('OAuth Start - Base URL:', baseUrl);
   console.log('OAuth Start - Redirect URI:', redirectUri);
