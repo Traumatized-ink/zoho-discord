@@ -190,7 +190,7 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
     const requestData = {
       fromAddress,
       toAddress,
-      action: 'Reply',
+      action: 'reply',
       subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
       content
     };
