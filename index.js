@@ -199,13 +199,12 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
     const accessToken = await getZohoAccessToken();
     console.log(`🔑 Got access token for reply: ${accessToken?.substring(0, 20)}...`);
     
-    // Use proper Reply API format (maintains threading)
+    // Try the most minimal reply request first
     const requestData = {
       fromAddress,
       toAddress,
-      action: "Reply",
-      subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-      content
+      action: "reply",
+      content: content
     };
     
     console.log(`📤 Sending reply via Reply API:`, {
@@ -213,6 +212,33 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
       content: content?.substring(0, 100) + '...'
     });
     
+    // First try: Test with Send Mail API to see if basic email sending works
+    console.log(`🧪 Testing with Send Mail API first...`);
+    const testResponse = await axios.post(
+      `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages`,
+      {
+        fromAddress,
+        toAddress,
+        subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+        content: `[REPLY TO MESSAGE ${messageId}]\n\n${content}`
+      },
+      {
+        headers: {
+          'Authorization': `Zoho-oauthtoken ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log(`✅ Send Mail API test response:`, {
+      status: testResponse.status,
+      data: testResponse.data
+    });
+    
+    return testResponse.data;
+    
+    // Commented out Reply API for now to test basic sending
+    /*
     const response = await axios.post(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${messageId}`,
       requestData,
@@ -229,6 +255,7 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
       data: response.data
     });
     return response.data;
+    */
   } catch (error) {
     console.error('❌ Error replying to email:', {
       message: error.message,
