@@ -446,6 +446,38 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+// HTML cleaning function
+function cleanHtmlContent(html, summary) {
+  if (!html) return summary || 'No content available';
+  
+  let cleaned = html
+    // Remove style blocks
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // Remove script blocks  
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    // Remove HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Decode HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    // Clean up whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  // Fallback to summary if result looks like CSS
+  if (cleaned.includes('box-sizing') || 
+      cleaned.includes('margin:') || 
+      cleaned.includes('padding:') ||
+      cleaned.length < 10) {
+    return summary || 'HTML email - content preview not available';
+  }
+  
+  return cleaned.substring(0, 1000);
+}
+
 // Enhanced webhook endpoint
 app.post('/webhook/zoho', async (req, res) => {
   try {
@@ -457,7 +489,7 @@ app.post('/webhook/zoho', async (req, res) => {
     console.log('=== END DEBUG ===');
     
     const emailContent = emailData.html || emailData.summary || 'No content available';
-    const cleanContent = emailContent.replace(/<[^>]*>/g, '').trim();
+    const cleanContent = cleanHtmlContent(emailData.html, emailData.summary);
     
     // Create embed with email details
     const embed = new EmbedBuilder()
