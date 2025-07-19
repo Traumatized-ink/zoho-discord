@@ -497,25 +497,41 @@ app.post('/webhook/zoho', async (req, res) => {
         'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, subject) VALUES (?, ?, ?, ?, ?)',
         [discordMessageId, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, emailData.subject],
         async (err) => {
-          if (!err && client.user) {
-            // Have Discord bot add buttons to the message
-            try {
-              const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
-              const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
-              
-              const channel = await client.channels.fetch(channelId);
-              const message = await channel.messages.fetch(discordMessageId);
-              
-              // Add buttons to the message
-              await message.edit({
-                embeds: message.embeds,
-                components: [row.toJSON()]
-              });
-              
-              console.log('✅ Added interactive buttons to Discord message');
-            } catch (error) {
-              console.error('Error adding buttons to message:', error);
-            }
+          if (err) {
+            console.error('Database error:', err);
+            return;
+          }
+          
+          console.log('🔧 Attempting to add buttons to Discord message...');
+          console.log('Discord bot ready:', !!client.user);
+          console.log('Discord message ID:', discordMessageId);
+          
+          if (!client.user) {
+            console.error('❌ Discord bot not ready yet');
+            return;
+          }
+          
+          try {
+            const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
+            const channelId = webhookUrl.pathname.split('/')[4]; // Extract channel ID from webhook URL
+            console.log('📍 Extracted channel ID:', channelId);
+            
+            const channel = await client.channels.fetch(channelId);
+            console.log('📢 Fetched channel:', channel.name);
+            
+            const message = await channel.messages.fetch(discordMessageId);
+            console.log('💬 Fetched message:', message.id);
+            
+            // Add buttons to the message
+            await message.edit({
+              embeds: message.embeds,
+              components: [row.toJSON()]
+            });
+            
+            console.log('✅ Added interactive buttons to Discord message');
+          } catch (error) {
+            console.error('❌ Error adding buttons to message:', error.message);
+            console.error('Full error:', error);
           }
         }
       );
