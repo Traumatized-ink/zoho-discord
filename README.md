@@ -65,13 +65,15 @@ npm install
 4. Copy the generated URL and open it in browser
 5. Select your Discord server and authorize
 
-### 3. Create Discord Webhook
+### 3. Create Discord Webhook & Get Channel ID
 
 1. Go to your Discord server
 2. Right-click the channel where you want emails
 3. Select **"Edit Channel"** → **"Integrations"** → **"Webhooks"**
 4. Click **"New Webhook"**
 5. Copy the webhook URL (save for later)
+6. **Enable Developer Mode** in Discord: User Settings → Advanced → Developer Mode
+7. **Right-click the same channel** → **"Copy Channel ID"** (save for later)
 
 ### 4. Setup Zoho API Application
 
@@ -99,6 +101,7 @@ Set these environment variables in your deployment platform:
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
 DISCORD_BOT_TOKEN=your_discord_bot_token
 DISCORD_CLIENT_ID=your_discord_application_id
+DISCORD_CHANNEL_ID=your_discord_channel_id
 
 # Zoho Configuration
 ZOHO_CLIENT_ID=your_zoho_client_id
@@ -263,6 +266,7 @@ curl https://your-domain.com/get-account-id
 | `DISCORD_WEBHOOK_URL` | ✅ | Discord webhook for posting messages | `https://discord.com/api/webhooks/...` |
 | `DISCORD_BOT_TOKEN` | ✅ | Discord bot authentication token | `MTk4N...` |
 | `DISCORD_CLIENT_ID` | ✅ | Discord application ID | `123456789` |
+| `DISCORD_CHANNEL_ID` | ✅ | Discord channel ID for bot messages | `1234567890123456789` |
 | `ZOHO_CLIENT_ID` | ✅ | Zoho API client identifier | `1000.ABC123` |
 | `ZOHO_CLIENT_SECRET` | ✅ | Zoho API client secret | `def456ghi789` |
 | `ZOHO_REFRESH_TOKEN` | ✅ | OAuth refresh token from authorization | `1000.jkl012...` |

@@ -486,30 +486,11 @@ app.post('/webhook/zoho', async (req, res) => {
       );
 
     // Send message directly via Discord bot (much simpler!)
-    if (client.user) {
+    if (client.user && process.env.DISCORD_CHANNEL_ID) {
       console.log('📤 Sending message via Discord bot...');
       
-      // Extract channel ID from webhook URL
-      const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
-      const pathParts = webhookUrl.pathname.split('/');
-      const webhookId = pathParts[3];
-      
-      // Get channel ID from webhook (this should work with bot permissions)
       try {
-        console.log('🔗 Webhook ID:', webhookId);
-        console.log('🔑 Bot token exists:', !!process.env.DISCORD_BOT_TOKEN);
-        console.log('🔑 Bot token length:', process.env.DISCORD_BOT_TOKEN?.length);
-        
-        const webhookInfo = await axios.get(`https://discord.com/api/v10/webhooks/${webhookId}`, {
-          headers: {
-            'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`
-          }
-        });
-        
-        const channelId = webhookInfo.data.channel_id;
-        console.log('📍 Got channel ID from webhook:', channelId);
-        
-        const channel = await client.channels.fetch(channelId);
+        const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
         console.log('📢 Fetched channel:', channel.name);
         
         const message = await channel.send({
@@ -527,11 +508,6 @@ app.post('/webhook/zoho', async (req, res) => {
         
       } catch (error) {
         console.error('❌ Error with Discord bot approach:', error.message);
-        if (error.response) {
-          console.error('❌ Response status:', error.response.status);
-          console.error('❌ Response data:', JSON.stringify(error.response.data, null, 2));
-        }
-        console.error('❌ Full error:', error);
         
         // Fallback to webhook if bot method fails
         console.log('📤 Falling back to webhook...');
@@ -541,7 +517,7 @@ app.post('/webhook/zoho', async (req, res) => {
         console.log('✅ Message sent via webhook (no buttons)');
       }
     } else {
-      console.log('❌ Discord bot not ready, using webhook fallback');
+      console.log('❌ Discord bot not ready or no channel ID, using webhook fallback');
       await axios.post(process.env.DISCORD_WEBHOOK_URL, {
         embeds: [embed.toJSON()]
       });
