@@ -12,10 +12,13 @@ A bidirectional email management system that allows you to:
 
 - ✅ **Email Notifications**: Rich Discord embeds for incoming emails
 - ✅ **Mark as Read**: One-click button to mark emails as read in Zoho
-- ✅ **Reply Functionality**: Modal popup to reply to emails from Discord
+- ✅ **Reply Functionality**: Modal popup to reply to emails from Discord with proper threading
+- ✅ **Smart Address Selection**: Automatically chooses best "from" address based on domain matching
 - ✅ **Interactive Buttons**: Discord UI components for email actions
-- ✅ **Message Mapping**: Tracks Discord ↔ Zoho message relationships
-- ✅ **Auto-token Refresh**: Handles Zoho OAuth token renewal automatically
+- ✅ **Auto Mark-as-Read**: Emails are automatically marked as read when you reply
+- ✅ **HTML Content Cleaning**: Removes CSS and displays clean email content
+- ✅ **Token Caching**: Prevents rate limiting with intelligent token management
+- ✅ **Outgoing Email Filter**: Only shows incoming emails, not your own sent emails
 
 ## Prerequisites
 
@@ -97,22 +100,24 @@ After OAuth setup, you'll use a helper script to get this automatically.
 Set these environment variables in your deployment platform:
 
 ```env
-# Discord Configuration
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
+# Discord Configuration (Required)
 DISCORD_BOT_TOKEN=your_discord_bot_token
-DISCORD_CLIENT_ID=your_discord_application_id
 DISCORD_CHANNEL_ID=your_discord_channel_id
 
-# Zoho Configuration
+# Zoho Configuration (Required)
 ZOHO_CLIENT_ID=your_zoho_client_id
 ZOHO_CLIENT_SECRET=your_zoho_client_secret
 ZOHO_REFRESH_TOKEN=will_be_generated_during_oauth
 ZOHO_ACCOUNT_ID=will_be_generated_during_oauth
-ZOHO_FROM_ADDRESS=your-email@yourdomain.com
 
-# Application Configuration
+# Application Configuration (Optional)
 BASE_URL=https://your-deployed-domain.com
 PORT=3000
+DATABASE_PATH=./data/email_mapping.db
+
+# Fallback Configuration (Optional)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
+DISCORD_CLIENT_ID=your_discord_application_id
 ```
 
 #### 5.2 Deployment Options
@@ -263,17 +268,17 @@ curl https://your-domain.com/get-account-id
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `DISCORD_WEBHOOK_URL` | ✅ | Discord webhook for posting messages | `https://discord.com/api/webhooks/...` |
 | `DISCORD_BOT_TOKEN` | ✅ | Discord bot authentication token | `MTk4N...` |
-| `DISCORD_CLIENT_ID` | ✅ | Discord application ID | `123456789` |
 | `DISCORD_CHANNEL_ID` | ✅ | Discord channel ID for bot messages | `1234567890123456789` |
 | `ZOHO_CLIENT_ID` | ✅ | Zoho API client identifier | `1000.ABC123` |
 | `ZOHO_CLIENT_SECRET` | ✅ | Zoho API client secret | `def456ghi789` |
 | `ZOHO_REFRESH_TOKEN` | ✅ | OAuth refresh token from authorization | `1000.jkl012...` |
 | `ZOHO_ACCOUNT_ID` | ✅ | Your Zoho Mail account identifier | `987654321` |
-| `ZOHO_FROM_ADDRESS` | ✅ | Email address for sending replies | `you@domain.com` |
 | `BASE_URL` | ⚠️ | Your deployment URL (for OAuth) | `https://yourdomain.com` |
 | `PORT` | ❌ | Server port (default: 3000) | `3000` |
+| `DATABASE_PATH` | ❌ | SQLite database location | `./data/email_mapping.db` |
+| `DISCORD_WEBHOOK_URL` | ❌ | Fallback webhook for posting messages | `https://discord.com/api/webhooks/...` |
+| `DISCORD_CLIENT_ID` | ❌ | Discord application ID (fallback only) | `123456789` |
 
 ✅ Required | ⚠️ Required for OAuth | ❌ Optional
 
