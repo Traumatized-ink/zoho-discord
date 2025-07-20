@@ -637,6 +637,21 @@ app.post('/webhook/zoho', async (req, res) => {
     console.log('=== ZOHO WEBHOOK DEBUG ===');
     console.log('Field names:', Object.keys(emailData));
     console.log('Full payload:', JSON.stringify(emailData, null, 2));
+    
+    // Check for attachment-related fields
+    const attachmentFields = Object.keys(emailData).filter(key => 
+      key.toLowerCase().includes('attach') || 
+      key.toLowerCase().includes('file') ||
+      key.toLowerCase().includes('hasattach')
+    );
+    if (attachmentFields.length > 0) {
+      console.log('🔗 Attachment-related fields found:', attachmentFields);
+      attachmentFields.forEach(field => {
+        console.log(`📎 ${field}:`, emailData[field]);
+      });
+    } else {
+      console.log('📎 No attachment fields detected in webhook');
+    }
     console.log('=== END DEBUG ===');
     
     // Skip outgoing emails (Mode 1 = sent, Mode 0 = received)
