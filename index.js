@@ -638,19 +638,33 @@ app.post('/webhook/zoho', async (req, res) => {
     console.log('Field names:', Object.keys(emailData));
     console.log('Full payload:', JSON.stringify(emailData, null, 2));
     
-    // Check for attachment-related fields
+    // Enhanced attachment detection
     const attachmentFields = Object.keys(emailData).filter(key => 
       key.toLowerCase().includes('attach') || 
       key.toLowerCase().includes('file') ||
       key.toLowerCase().includes('hasattach')
     );
+    
+    // Size-based attachment detection (heuristic)
+    const contentLength = emailData.html?.length || emailData.summary?.length || 0;
+    const sizeRatio = emailData.size / Math.max(contentLength, 1);
+    const likelyHasAttachment = sizeRatio > 5; // If email is 5x larger than content
+    
+    console.log('📎 Attachment Analysis:');
+    console.log(`   Size: ${emailData.size} bytes`);
+    console.log(`   Content length: ${contentLength} chars`);
+    console.log(`   Size ratio: ${sizeRatio.toFixed(2)}`);
+    console.log(`   Likely has attachment: ${likelyHasAttachment}`);
+    
     if (attachmentFields.length > 0) {
       console.log('🔗 Attachment-related fields found:', attachmentFields);
       attachmentFields.forEach(field => {
         console.log(`📎 ${field}:`, emailData[field]);
       });
+    } else if (likelyHasAttachment) {
+      console.log('📎 No explicit attachment fields, but size suggests attachments present');
     } else {
-      console.log('📎 No attachment fields detected in webhook');
+      console.log('📎 No attachment indicators detected');
     }
     console.log('=== END DEBUG ===');
     
@@ -682,6 +696,15 @@ app.post('/webhook/zoho', async (req, res) => {
         { name: 'Content', value: cleanContent.length > 1000 ? cleanContent.substring(0, 1000) + '...' : cleanContent, inline: false }
       )
       .setTimestamp();
+
+    // Add attachment indicator if detected
+    if (attachmentFields.length > 0 || likelyHasAttachment) {
+      embed.addFields({ 
+        name: '📎 Attachments', 
+        value: attachmentFields.length > 0 ? 'Attachments detected' : `Likely has attachments (${emailData.size} bytes)`, 
+        inline: true 
+      });
+    }
 
     // Create action buttons
     const row = new ActionRowBuilder()
