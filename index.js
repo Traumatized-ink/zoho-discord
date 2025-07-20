@@ -174,9 +174,19 @@ async function markEmailAsRead(messageId) {
     const accessToken = await getZohoAccessToken();
     console.log(`🔑 Got access token: ${accessToken?.substring(0, 20)}...`);
     
+    // Try multiple message ID formats to see what works
+    const formats = {
+      asString: messageId.toString(),
+      asNumber: parseInt(messageId),
+      asArray: [parseInt(messageId)],
+      asStringArray: [messageId.toString()]
+    };
+    
+    console.log(`🔢 Testing message ID formats:`, formats);
+    
     const requestData = {
       mode: 'markAsRead',
-      messageId: [parseInt(messageId)]
+      messageId: formats.asArray  // Try array of numbers first
     };
     console.log(`📤 Sending mark as read request:`, requestData);
     
@@ -193,8 +203,30 @@ async function markEmailAsRead(messageId) {
     
     console.log(`✅ Mark as read response:`, {
       status: response.status,
-      data: response.data
+      data: response.data,
+      headers: response.headers
     });
+    
+    // Add a verification check - try to get the email status after marking
+    console.log(`🔍 Verifying email was marked as read...`);
+    try {
+      const verifyResponse = await axios.get(
+        `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages/${messageId}`,
+        {
+          headers: {
+            'Authorization': `Zoho-oauthtoken ${accessToken}`
+          }
+        }
+      );
+      console.log(`📧 Email status after mark as read:`, {
+        status: verifyResponse.data?.data?.status,
+        subject: verifyResponse.data?.data?.subject,
+        isRead: verifyResponse.data?.data?.isRead
+      });
+    } catch (verifyError) {
+      console.log(`⚠️ Could not verify email status:`, verifyError.message);
+    }
+    
     return response.data;
   } catch (error) {
     console.error('❌ Error marking email as read:', {
