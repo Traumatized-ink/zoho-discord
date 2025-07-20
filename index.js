@@ -56,8 +56,7 @@ async function updateFromAddresses() {
     const accountData = response.data.data[0];
     if (!accountData) return;
 
-    console.log(`Found ${accountData.emailAddress.length} email addresses`);
-    console.log(`Found ${accountData.sendMailDetails.length} send mail details`);
+    console.log(`📧 Loaded ${accountData.emailAddress.length} email addresses`);
 
     // Clear existing addresses
     await new Promise((resolve, reject) => {
@@ -95,7 +94,7 @@ async function updateFromAddresses() {
       });
     }
 
-    console.log('✅ Updated from addresses in database');
+    console.log('✅ Email addresses updated');
   } catch (error) {
     console.error('Error updating from addresses:', error);
   }
@@ -112,16 +111,13 @@ async function getFromAddresses() {
 
 async function smartSelectFromAddress(toAddress) {
   const addresses = await getFromAddresses();
-  console.log(`🔍 Smart address selection for: ${toAddress}`);
-  console.log(`📧 Available addresses: ${addresses.map(a => a.email_address).join(', ')}`);
   
   // Try to match domain
   if (toAddress) {
     const toDomain = toAddress.split('@')[1];
-    console.log(`🌐 Looking for domain match: ${toDomain}`);
     const domainMatch = addresses.find(addr => addr.email_address.includes(toDomain));
     if (domainMatch) {
-      console.log(`✅ Found domain match: ${domainMatch.email_address}`);
+      console.log(`📧 Using domain match: ${domainMatch.email_address}`);
       return domainMatch.email_address;
     }
   }
@@ -129,7 +125,7 @@ async function smartSelectFromAddress(toAddress) {
   // Fallback to primary address
   const primary = addresses.find(addr => addr.is_primary);
   const selected = primary ? primary.email_address : addresses[0]?.email_address;
-  console.log(`🔄 Using fallback address: ${selected}`);
+  console.log(`📧 Using primary address: ${selected}`);
   return selected;
 }
 
@@ -142,7 +138,6 @@ async function getZohoAccessToken() {
   try {
     // Check if we have a valid cached token
     if (cachedAccessToken && tokenExpiresAt && Date.now() < tokenExpiresAt) {
-      console.log('🔄 Using cached access token');
       return cachedAccessToken;
     }
     
@@ -160,7 +155,7 @@ async function getZohoAccessToken() {
     cachedAccessToken = response.data.access_token;
     tokenExpiresAt = Date.now() + (55 * 60 * 1000); // 55 minutes
     
-    console.log('✅ New access token cached');
+    console.log('✅ Access token refreshed');
     return cachedAccessToken;
   } catch (error) {
     console.error('Error getting Zoho access token:', error);
@@ -170,25 +165,13 @@ async function getZohoAccessToken() {
 
 async function markEmailAsRead(messageId) {
   try {
-    console.log(`📖 Attempting to mark email ${messageId} as read...`);
+    console.log(`📖 Marking email ${messageId} as read`);
     const accessToken = await getZohoAccessToken();
-    console.log(`🔑 Got access token: ${accessToken?.substring(0, 20)}...`);
-    
-    // Try multiple message ID formats to see what works
-    const formats = {
-      asString: messageId.toString(),
-      asNumber: parseInt(messageId),
-      asArray: [parseInt(messageId)],
-      asStringArray: [messageId.toString()]
-    };
-    
-    console.log(`🔢 Testing message ID formats:`, formats);
     
     const requestData = {
       mode: 'markAsRead',
-      messageId: formats.asArray  // Try array of numbers first
+      messageId: [parseInt(messageId)]
     };
-    console.log(`📤 Sending mark as read request:`, requestData);
     
     const response = await axios.put(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/updatemessage`,
@@ -201,56 +184,20 @@ async function markEmailAsRead(messageId) {
       }
     );
     
-    console.log(`✅ Mark as read response:`, {
-      status: response.status,
-      data: response.data,
-      headers: response.headers
-    });
-    
-    // The 404 verification error is actually normal - it means the email status changed!
-    console.log(`✅ Mark as read completed successfully`);
-    
-    // Add a small delay to account for any Zoho processing time
-    setTimeout(() => {
-      console.log(`📬 Email should now be marked as read in Zoho Mail`);
-    }, 1000);
+    console.log('✅ Email marked as read');
     
     return response.data;
   } catch (error) {
-    console.error('❌ Error marking email as read:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      messageId: messageId
-    });
+    console.error('❌ Failed to mark email as read:', error.message);
     throw error;
   }
 }
 
 async function replyToEmail(messageId, fromAddress, toAddress, subject, content) {
   try {
-    console.log(`💬 Attempting to reply to email ${messageId}...`);
-    console.log(`📧 Reply details: FROM: ${fromAddress} → TO: ${toAddress}`);
-    console.log(`📧 Message ID type: ${typeof messageId}, value: ${messageId}`);
-    
+    console.log(`💬 Sending reply from ${fromAddress} to ${toAddress}`);
     const accessToken = await getZohoAccessToken();
-    console.log(`🔑 Got access token for reply: ${accessToken?.substring(0, 20)}...`);
     
-    // Try the most minimal reply request first
-    const requestData = {
-      fromAddress,
-      toAddress,
-      action: "reply",
-      content: content
-    };
-    
-    console.log(`📤 Sending reply via Reply API:`, {
-      ...requestData,
-      content: content?.substring(0, 100) + '...'
-    });
-    
-    // First try: Test with Send Mail API to see if basic email sending works
-    console.log(`🧪 Testing with Send Mail API first...`);
     const testResponse = await axios.post(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/messages`,
       {
@@ -267,10 +214,7 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
       }
     );
     
-    console.log(`✅ Send Mail API test response:`, {
-      status: testResponse.status,
-      data: testResponse.data
-    });
+    console.log('✅ Reply sent successfully');
     
     return testResponse.data;
     
@@ -294,14 +238,7 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
     return response.data;
     */
   } catch (error) {
-    console.error('❌ Error replying to email:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      messageId: messageId,
-      fromAddress,
-      toAddress
-    });
+    console.error('❌ Failed to send reply:', error.message);
     throw error;
   }
 }
@@ -519,25 +456,19 @@ client.on('interactionCreate', async interaction => {
       );
     });
     
-    console.log(`📊 Database lookup for message ${zohoMessageId}:`, emailData);
-
     if (emailData) {
       // Send reply
-      console.log(`📤 Sending reply to message ${zohoMessageId} from ${fromAddress}`);
       await replyToEmail(
         zohoMessageId,
-        fromAddress, // Use selected from address (this should be a Zoho address)
-        emailData.sender_email, // Send TO the original sender
+        fromAddress,
+        emailData.sender_email,
         emailData.subject,
         replyContent
       );
-      console.log(`✅ Reply sent successfully`);
 
       // Mark email as read (since replying implies reading)
-      console.log(`📖 Auto-marking email ${zohoMessageId} as read after reply`);
       try {
         await markEmailAsRead(zohoMessageId);
-        console.log(`✅ Email auto-marked as read after reply`);
         
         // Update the original Discord message to show it's been read
         const originalMessage = await interaction.client.channels.cache.get(process.env.DISCORD_CHANNEL_ID)?.messages.fetch(emailData.discord_message_id);
@@ -552,8 +483,7 @@ client.on('interactionCreate', async interaction => {
           });
         }
       } catch (markReadError) {
-        console.error('⚠️ Failed to auto-mark email as read after reply:', markReadError);
-        // Don't fail the reply if mark as read fails
+        console.error('⚠️ Failed to auto-mark as read:', markReadError.message);
       }
 
       // Get display name for the selected from address
@@ -581,15 +511,7 @@ client.on('interactionCreate', async interaction => {
       });
     }
   } catch (error) {
-    console.error('Error sending reply:', error);
-    console.error('Reply error details:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      zohoMessageId,
-      fromAddress,
-      replyContent: replyContent?.substring(0, 100) + '...'
-    });
+    console.error('Error sending reply:', error.message);
     await interaction.reply({
       content: `❌ Error sending reply: ${error.message}`,
       ephemeral: true
@@ -634,44 +556,11 @@ app.post('/webhook/zoho', async (req, res) => {
   try {
     const emailData = req.body;
     
-    console.log('=== ZOHO WEBHOOK DEBUG ===');
-    console.log('Field names:', Object.keys(emailData));
-    console.log('Full payload:', JSON.stringify(emailData, null, 2));
-    
-    // Enhanced attachment detection
-    const attachmentFields = Object.keys(emailData).filter(key => 
-      key.toLowerCase().includes('attach') || 
-      key.toLowerCase().includes('file') ||
-      key.toLowerCase().includes('hasattach')
-    );
-    
-    // Size-based attachment detection (heuristic)
-    const contentLength = emailData.html?.length || emailData.summary?.length || 0;
-    const sizeRatio = emailData.size / Math.max(contentLength, 1);
-    const likelyHasAttachment = sizeRatio > 5; // If email is 5x larger than content
-    
-    console.log('📎 Attachment Analysis:');
-    console.log(`   Size: ${emailData.size} bytes`);
-    console.log(`   Content length: ${contentLength} chars`);
-    console.log(`   Size ratio: ${sizeRatio.toFixed(2)}`);
-    console.log(`   Likely has attachment: ${likelyHasAttachment}`);
-    
-    if (attachmentFields.length > 0) {
-      console.log('🔗 Attachment-related fields found:', attachmentFields);
-      attachmentFields.forEach(field => {
-        console.log(`📎 ${field}:`, emailData[field]);
-      });
-    } else if (likelyHasAttachment) {
-      console.log('📎 No explicit attachment fields, but size suggests attachments present');
-    } else {
-      console.log('📎 No attachment indicators detected');
-    }
-    console.log('=== END DEBUG ===');
+    console.log(`📧 New email: "${emailData.subject}" from ${emailData.fromAddress}`);
     
     // Skip outgoing emails (Mode 1 = sent, Mode 0 = received)
-    console.log(`🔍 Email Mode check: ${emailData.Mode} (type: ${typeof emailData.Mode})`);
     if (emailData.Mode === 1) {
-      console.log('📤 Skipping outgoing email (Mode 1)');
+      console.log('📤 Skipping outgoing email');
       return res.status(200).json({ success: true, message: 'Outgoing email ignored' });
     }
     
@@ -679,7 +568,7 @@ app.post('/webhook/zoho', async (req, res) => {
     const fromAddresses = await getFromAddresses();
     const isFromOwnAddress = fromAddresses.some(addr => addr.email_address === emailData.fromAddress);
     if (isFromOwnAddress) {
-      console.log(`📤 Skipping email from own address: ${emailData.fromAddress}`);
+      console.log(`📤 Skipping email from own address`);
       return res.status(200).json({ success: true, message: 'Own email ignored' });
     }
     
@@ -697,14 +586,6 @@ app.post('/webhook/zoho', async (req, res) => {
       )
       .setTimestamp();
 
-    // Add attachment indicator if detected
-    if (attachmentFields.length > 0 || likelyHasAttachment) {
-      embed.addFields({ 
-        name: '📎 Attachments', 
-        value: attachmentFields.length > 0 ? 'Attachments detected' : `Likely has attachments (${emailData.size} bytes)`, 
-        inline: true 
-      });
-    }
 
     // Create action buttons
     const row = new ActionRowBuilder()
@@ -721,43 +602,38 @@ app.post('/webhook/zoho', async (req, res) => {
           .setEmoji('💬')
       );
 
-    // Send message directly via Discord bot (much simpler!)
+    // Send message via Discord bot
     if (client.user && process.env.DISCORD_CHANNEL_ID) {
-      console.log('📤 Sending message via Discord bot...');
-      
       try {
         const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
-        console.log('📢 Fetched channel:', channel.name);
-        
         const message = await channel.send({
           embeds: [embed],
           components: [row]
         });
         
-        console.log('✅ Message sent directly via Discord bot with buttons!');
+        console.log('✅ Message sent to Discord');
         
         // Store mapping in database
-        const cleanRecipientEmail = emailData.toAddress.replace(/[<>]/g, ''); // Remove angle brackets
+        const cleanRecipientEmail = emailData.toAddress.replace(/[<>]/g, '');
         db.run(
           'INSERT INTO email_mappings (discord_message_id, zoho_message_id, zoho_account_id, sender_email, recipient_email, subject) VALUES (?, ?, ?, ?, ?, ?)',
           [message.id, emailData.messageId.toString(), process.env.ZOHO_ACCOUNT_ID, emailData.fromAddress, cleanRecipientEmail, emailData.subject]
         );
         
       } catch (error) {
-        console.error('❌ Error with Discord bot approach:', error.message);
+        console.error('❌ Discord error:', error.message);
         
         // Fallback to webhook if bot method fails
-        console.log('📤 Falling back to webhook...');
         await axios.post(process.env.DISCORD_WEBHOOK_URL, {
           embeds: [embed.toJSON()]
         });
-        console.log('✅ Message sent via webhook (no buttons)');
+        console.log('✅ Message sent via webhook fallback');
       }
     } else {
-      console.log('❌ Discord bot not ready or no channel ID, using webhook fallback');
       await axios.post(process.env.DISCORD_WEBHOOK_URL, {
         embeds: [embed.toJSON()]
       });
+      console.log('✅ Message sent via webhook');
     }
     
     res.status(200).json({ success: true });
@@ -840,8 +716,6 @@ app.get('/oauth/start', (req, res) => {
   const redirectUri = `${baseUrl}/oauth/callback`;
   const authUrl = `https://accounts.zoho.com/oauth/v2/auth?scope=ZohoMail.messages.ALL,ZohoMail.accounts.READ&client_id=${process.env.ZOHO_CLIENT_ID}&response_type=code&redirect_uri=${redirectUri}&access_type=offline`;
   
-  console.log('OAuth Start - Base URL:', baseUrl);
-  console.log('OAuth Start - Redirect URI:', redirectUri);
   
   res.send(`
     <h1>Zoho OAuth Setup</h1>
@@ -863,8 +737,6 @@ app.get('/oauth/callback', async (req, res) => {
     const baseUrl = getBaseUrl(req);
     const redirectUri = `${baseUrl}/oauth/callback`;
     
-    console.log('OAuth Callback - Base URL:', baseUrl);
-    console.log('OAuth Callback - Redirect URI:', redirectUri);
     
     const response = await axios.post('https://accounts.zoho.com/oauth/v2/token', null, {
       params: {
@@ -878,7 +750,6 @@ app.get('/oauth/callback', async (req, res) => {
     
     const { refresh_token } = response.data;
     
-    console.log('✅ OAuth Success! Refresh token generated');
     
     res.send(`
       <h1>✅ OAuth Setup Complete!</h1>
