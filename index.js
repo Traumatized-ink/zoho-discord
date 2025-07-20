@@ -237,7 +237,7 @@ async function replyToEmail(messageId, fromAddress, toAddress, subject, content)
         fromAddress,
         toAddress,
         subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-        content: `[REPLY TO MESSAGE ${messageId}]\n\n${content}`
+        content: content
       },
       {
         headers: {
@@ -618,6 +618,21 @@ app.post('/webhook/zoho', async (req, res) => {
     console.log('Field names:', Object.keys(emailData));
     console.log('Full payload:', JSON.stringify(emailData, null, 2));
     console.log('=== END DEBUG ===');
+    
+    // Skip outgoing emails (Mode 1 = sent, Mode 0 = received)
+    console.log(`🔍 Email Mode check: ${emailData.Mode} (type: ${typeof emailData.Mode})`);
+    if (emailData.Mode === 1) {
+      console.log('📤 Skipping outgoing email (Mode 1)');
+      return res.status(200).json({ success: true, message: 'Outgoing email ignored' });
+    }
+    
+    // Additional check - skip emails from your own domain/addresses
+    const fromAddresses = await getFromAddresses();
+    const isFromOwnAddress = fromAddresses.some(addr => addr.email_address === emailData.fromAddress);
+    if (isFromOwnAddress) {
+      console.log(`📤 Skipping email from own address: ${emailData.fromAddress}`);
+      return res.status(200).json({ success: true, message: 'Own email ignored' });
+    }
     
     const emailContent = emailData.html || emailData.summary || 'No content available';
     const cleanContent = cleanHtmlContent(emailData.html, emailData.summary);
