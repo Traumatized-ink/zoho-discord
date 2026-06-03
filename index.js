@@ -8,6 +8,18 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Prefix all console output with a timestamp down to the minute (local time)
+function logTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+['log', 'error', 'warn', 'info'].forEach(method => {
+  const original = console[method].bind(console);
+  console[method] = (...args) => original(`[${logTimestamp()}]`, ...args);
+});
+
 // Initialize Discord bot
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
@@ -551,6 +563,27 @@ function cleanHtmlContent(html, summary) {
   return cleaned.substring(0, 1000);
 }
 
+// Best-effort error notification to Discord (tries bot first, then webhook fallback)
+async function sendErrorToDiscord(text) {
+  try {
+    if (client.user && process.env.DISCORD_CHANNEL_ID) {
+      const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
+      await channel.send({ content: text });
+      return;
+    }
+  } catch (err) {
+    console.error('❌ Failed to send error notice via bot:', err.message);
+  }
+
+  try {
+    if (process.env.DISCORD_WEBHOOK_URL) {
+      await axios.post(process.env.DISCORD_WEBHOOK_URL, { content: text });
+    }
+  } catch (err) {
+    console.error('❌ Failed to send error notice via webhook:', err.message);
+  }
+}
+
 // Enhanced webhook endpoint
 app.post('/webhook/zoho', async (req, res) => {
   try {
@@ -639,6 +672,15 @@ app.post('/webhook/zoho', async (req, res) => {
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('Error forwarding email to Discord:', error);
+
+    // Notify Discord that an email arrived but couldn't be processed,
+    // salvaging whatever fields we can (never throws on missing content)
+    const subject = req.body?.subject || 'Unknown subject';
+    const from = req.body?.fromAddress || 'unknown sender';
+    await sendErrorToDiscord(
+      `⚠️ **Failed to process incoming email**\n**From:** ${from}\n**Subject:** ${subject}\n**Error:** ${error.message}`
+    );
+
     res.status(500).json({ error: 'Failed to forward email' });
   }
 });
