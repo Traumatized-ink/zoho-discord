@@ -53,7 +53,8 @@ db.serialize(() => {
   )`);
 });
 
-app.use(express.json());
+app.use(express.json({ limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
 
 // From address management functions
 async function updateFromAddresses() {
@@ -584,6 +585,10 @@ async function sendErrorToDiscord(text) {
   }
 }
 
+function hasUsableEmailPayload(emailData) {
+  return Boolean(emailData?.messageId && emailData?.fromAddress && emailData?.subject);
+}
+
 // Enhanced webhook endpoint
 app.post('/webhook/zoho', async (req, res) => {
   try {
@@ -591,6 +596,14 @@ app.post('/webhook/zoho', async (req, res) => {
     
     console.log(`📧 New email: "${emailData.subject}" from ${emailData.fromAddress}`);
     
+    if (!hasUsableEmailPayload(emailData)) {
+      console.log('Zoho webhook verification received');
+      return res.status(200).json({
+        success: true,
+        message: 'Webhook verification acknowledged'
+      });
+    }
+
     // Skip outgoing emails (Mode 1 = sent, Mode 0 = received)
     if (emailData.Mode === 1) {
       console.log('📤 Skipping outgoing email');
