@@ -632,6 +632,11 @@ app.post('/webhook/zoho', async (req, res) => {
       )
       .setTimestamp();
 
+    // Plain-text line so mobile push previews show sender + subject instead of a generic notice
+    const senderName = emailData.sender || emailData.fromAddress || 'Unknown sender';
+    const subjectLine = emailData.subject || '(no subject)';
+    const previewContent = `📧 **${senderName}**: ${subjectLine}`.substring(0, 300);
+    const noMentions = { parse: [] };
 
     // Create action buttons
     const row = new ActionRowBuilder()
@@ -653,6 +658,8 @@ app.post('/webhook/zoho', async (req, res) => {
       try {
         const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
         const message = await channel.send({
+          content: previewContent,
+          allowedMentions: noMentions,
           embeds: [embed],
           components: [row]
         });
@@ -671,12 +678,16 @@ app.post('/webhook/zoho', async (req, res) => {
         
         // Fallback to webhook if bot method fails
         await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+          content: previewContent,
+          allowed_mentions: noMentions,
           embeds: [embed.toJSON()]
         });
         console.log('✅ Message sent via webhook fallback');
       }
     } else {
       await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+        content: previewContent,
+        allowed_mentions: noMentions,
         embeds: [embed.toJSON()]
       });
       console.log('✅ Message sent via webhook');
