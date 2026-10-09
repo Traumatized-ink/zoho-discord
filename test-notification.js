@@ -29,7 +29,14 @@ const payload = {
       console.error(`❌ ${res.status} ${res.statusText}: ${body}`);
       process.exit(1);
     }
-    console.log(`✅ ${res.status}: ${body}`);
+    // Proxies/DNS filters can answer 200 with an HTML page, so require the bot's JSON reply
+    let json;
+    try { json = JSON.parse(body); } catch (_) {}
+    if (!json?.success) {
+      console.error(`❌ Unexpected response (request may not have reached the bot): ${body.substring(0, 200)}`);
+      process.exit(1);
+    }
+    console.log(`✅ ${res.status}: ${body} - check Discord`);
   } catch (error) {
     console.error('❌ Request failed:', error.message);
     process.exit(1);
