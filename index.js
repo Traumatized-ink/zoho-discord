@@ -119,7 +119,15 @@ function preserveZohoIds(key, value, context) {
   return value;
 }
 
-app.use(express.json({ limit: process.env.WEBHOOK_BODY_LIMIT || '10mb', reviver: preserveZohoIds }));
+app.use(express.json({
+  limit: process.env.WEBHOOK_BODY_LIMIT || '10mb',
+  reviver: preserveZohoIds,
+  // Diagnostic: log messageId exactly as Zoho sent it, to check for upstream rounding
+  verify: (req, res, buf) => {
+    const match = buf.toString('utf8', 0, Math.min(buf.length, 200000)).match(/"messageId"\s*:\s*("?[^,}\s]+)/);
+    if (match) console.log(`🔎 Raw messageId from webhook: ${match[1]} (content-type: ${req.headers['content-type']})`);
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
 
 // From address management functions
@@ -898,6 +906,7 @@ app.post('/webhook/zoho', async (req, res) => {
     const emailData = req.body;
     
     console.log(`📧 New email: "${emailData.subject}" from ${emailData.fromAddress}`);
+    console.log(`🔎 Parsed messageId: ${emailData.messageId} (${typeof emailData.messageId}, content-type: ${req.headers['content-type']})`);
     
     if (!hasUsableEmailPayload(emailData)) {
       console.log('Zoho webhook verification received');
@@ -1139,5 +1148,5 @@ if (process.env.DISCORD_BOT_TOKEN) {
 }
 
 app.listen(PORT, () => {
-  console.log(`Zoho-Discord integration server running on port ${PORT}`);
+  console.log(`Zoho-Discord integration server running on port ${PORT} (Node ${process.version})`);
 });
