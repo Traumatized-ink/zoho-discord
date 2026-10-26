@@ -110,7 +110,16 @@ async function getBlockedSenders() {
   return dbAll('SELECT * FROM blocked_senders ORDER BY email_address ASC');
 }
 
-app.use(express.json({ limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
+// Zoho IDs are 19 digits, beyond Number.MAX_SAFE_INTEGER, so keep their exact source text
+// (context.source needs Node 21+)
+function preserveZohoIds(key, value, context) {
+  if (typeof value === 'number' && /(message|folder|thread)Id$/i.test(key) && context?.source) {
+    return context.source;
+  }
+  return value;
+}
+
+app.use(express.json({ limit: process.env.WEBHOOK_BODY_LIMIT || '10mb', reviver: preserveZohoIds }));
 app.use(express.urlencoded({ extended: true, limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
 
 // From address management functions
@@ -233,19 +242,29 @@ async function getZohoAccessToken() {
   }
 }
 
+// updatemessage body with the ID digits written verbatim; parseInt/JSON numbers would round them
+function updateMessageBody(mode, messageId) {
+  const id = String(messageId);
+  if (!/^\d+$/.test(id)) throw new Error(`Invalid Zoho message ID: ${id}`);
+  return `{"mode":${JSON.stringify(mode)},"messageId":[${id}]}`;
+}
+
+// Zoho can answer HTTP 200 with a failure in the body
+function assertZohoSuccess(response) {
+  const status = response.data?.status;
+  if (status && status.code !== 200) {
+    throw new Error(`Zoho ${status.code}: ${status.description || 'unknown error'}`);
+  }
+}
+
 async function markEmailAsRead(messageId) {
   try {
     console.log(`📖 Marking email ${messageId} as read`);
     const accessToken = await getZohoAccessToken();
     
-    const requestData = {
-      mode: 'markAsRead',
-      messageId: [parseInt(messageId)]
-    };
-    
     const response = await axios.put(
       `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/updatemessage`,
-      requestData,
+      updateMessageBody('markAsRead', messageId),
       {
         headers: {
           'Authorization': `Zoho-oauthtoken ${accessToken}`,
@@ -253,7 +272,8 @@ async function markEmailAsRead(messageId) {
         }
       }
     );
-    
+    assertZohoSuccess(response);
+
     console.log('✅ Email marked as read');
     
     return response.data;
@@ -271,10 +291,7 @@ async function setEmailSpam(messageId, mode) {
 
   const response = await axios.put(
     `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/updatemessage`,
-    {
-      mode,
-      messageId: [parseInt(messageId)]
-    },
+    updateMessageBody(mode, messageId),
     {
       headers: {
         'Authorization': `Zoho-oauthtoken ${accessToken}`,
@@ -282,6 +299,7 @@ async function setEmailSpam(messageId, mode) {
       }
     }
   );
+  assertZohoSuccess(response);
 
   console.log(`✅ ${mode} done`);
   return response.data;
