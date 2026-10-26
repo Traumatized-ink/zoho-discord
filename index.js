@@ -51,7 +51,64 @@ db.serialize(() => {
     send_mail_id TEXT,
     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS blocked_senders (
+    email_address TEXT PRIMARY KEY,
+    blocked_by TEXT,
+    blocked_count INTEGER DEFAULT 0,
+    last_blocked_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
 });
+
+// Promise wrappers for sqlite3's callback API
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+}
+
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+  });
+}
+
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
+  });
+}
+
+// Blocked sender management
+function normalizeEmail(address) {
+  return (address || '').replace(/[<>]/g, '').trim().toLowerCase();
+}
+
+async function isSenderBlocked(address) {
+  return Boolean(await dbGet('SELECT 1 FROM blocked_senders WHERE email_address = ?', [normalizeEmail(address)]));
+}
+
+async function blockSender(address, blockedBy) {
+  const result = await dbRun(
+    'INSERT OR IGNORE INTO blocked_senders (email_address, blocked_by) VALUES (?, ?)',
+    [normalizeEmail(address), blockedBy]
+  );
+  return result.changes > 0;
+}
+
+async function unblockSender(address) {
+  const result = await dbRun('DELETE FROM blocked_senders WHERE email_address = ?', [normalizeEmail(address)]);
+  return result.changes > 0;
+}
+
+async function getBlockedSenders() {
+  return dbAll('SELECT * FROM blocked_senders ORDER BY email_address ASC');
+}
 
 app.use(express.json({ limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: process.env.WEBHOOK_BODY_LIMIT || '10mb' }));
@@ -206,6 +263,48 @@ async function markEmailAsRead(messageId) {
   }
 }
 
+// mode is 'moveToSpam' or 'markNotSpam'. Zoho learns from these per mailbox,
+// so future mail from the sender goes to this account's Spam folder.
+async function setEmailSpam(messageId, mode) {
+  console.log(`🚫 ${mode} for email ${messageId}`);
+  const accessToken = await getZohoAccessToken();
+
+  const response = await axios.put(
+    `https://mail.zoho.com/api/accounts/${process.env.ZOHO_ACCOUNT_ID}/updatemessage`,
+    {
+      mode,
+      messageId: [parseInt(messageId)]
+    },
+    {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    }
+  );
+
+  console.log(`✅ ${mode} done`);
+  return response.data;
+}
+
+// Best effort: mark as read and move to Spam. Returns what succeeded.
+async function discardEmail(messageId) {
+  const outcome = { read: false, spam: false };
+  try {
+    await markEmailAsRead(messageId);
+    outcome.read = true;
+  } catch (error) {
+    // markEmailAsRead already logged it
+  }
+  try {
+    await setEmailSpam(messageId, 'moveToSpam');
+    outcome.spam = true;
+  } catch (error) {
+    console.error('❌ Failed to move email to spam:', error.response?.data?.status?.description || error.message);
+  }
+  return outcome;
+}
+
 async function replyToEmail(messageId, fromAddress, toAddress, subject, content) {
   try {
     console.log(`💬 Sending reply from ${fromAddress} to ${toAddress}`);
@@ -277,6 +376,111 @@ client.once('ready', async () => {
     
     console.log('📅 Daily refresh scheduled (every 24 hours)');
   }
+
+  await registerSlashCommands();
+});
+
+const slashCommands = [
+  {
+    name: 'blocks',
+    description: 'List blocked email senders'
+  },
+  {
+    name: 'block',
+    description: 'Block an email sender (their mail is marked read and moved to Spam)',
+    options: [{ type: 3, name: 'address', description: 'Email address to block', required: true }]
+  },
+  {
+    name: 'unblock',
+    description: 'Unblock an email sender',
+    options: [{ type: 3, name: 'address', description: 'Email address to unblock', required: true, autocomplete: true }]
+  }
+];
+
+// Guild commands show up immediately (global ones can take up to an hour)
+async function registerSlashCommands() {
+  try {
+    const channel = await client.channels.fetch(process.env.DISCORD_CHANNEL_ID);
+    await channel.guild.commands.set(slashCommands);
+    console.log(`✅ Registered ${slashCommands.length} slash commands in ${channel.guild.name}`);
+  } catch (error) {
+    console.error('❌ Failed to register slash commands:', error.message);
+  }
+}
+
+function formatBlockedList(rows) {
+  if (rows.length === 0) return '✅ No blocked senders.';
+
+  const lines = rows.map(row => {
+    const since = row.created_at ? `<t:${Math.floor(new Date(row.created_at + 'Z').getTime() / 1000)}:d>` : '?';
+    const hits = row.blocked_count ? ` · ${row.blocked_count} blocked` : '';
+    return `• \`${row.email_address}\` (since ${since}${hits})`;
+  });
+
+  let content = `🚫 **Blocked senders (${rows.length}):**\n`;
+  // Discord caps messages at 2000 characters
+  for (let i = 0; i < lines.length; i++) {
+    if (content.length + lines[i].length + 30 > 2000) {
+      content += `…and ${lines.length - i} more`;
+      break;
+    }
+    content += lines[i] + '\n';
+  }
+  return content;
+}
+
+// Slash commands and autocomplete
+client.on('interactionCreate', async interaction => {
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName !== 'unblock') return;
+    try {
+      const typed = interaction.options.getFocused().toLowerCase();
+      const rows = await getBlockedSenders();
+      await interaction.respond(
+        rows
+          .filter(row => row.email_address.includes(typed))
+          .slice(0, 25)
+          .map(row => ({ name: row.email_address, value: row.email_address }))
+      );
+    } catch (error) {
+      console.error('Error handling autocomplete:', error.message);
+    }
+    return;
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+
+  try {
+    if (interaction.commandName === 'blocks') {
+      const rows = await getBlockedSenders();
+      await interaction.reply({ content: formatBlockedList(rows), ephemeral: true });
+
+    } else if (interaction.commandName === 'block') {
+      const address = normalizeEmail(interaction.options.getString('address'));
+      if (!address.includes('@')) {
+        await interaction.reply({ content: `❌ \`${address}\` doesn't look like an email address.`, ephemeral: true });
+        return;
+      }
+      const added = await blockSender(address, interaction.user.tag);
+      console.log(`🚫 ${interaction.user.tag} blocked ${address}`);
+      await interaction.reply({
+        content: added ? `🚫 Blocked \`${address}\`. Their emails will be marked as read and moved to Spam, with no notification.` : `\`${address}\` is already blocked.`,
+        ephemeral: true
+      });
+
+    } else if (interaction.commandName === 'unblock') {
+      const address = normalizeEmail(interaction.options.getString('address'));
+      const removed = await unblockSender(address);
+      if (removed) console.log(`✅ ${interaction.user.tag} unblocked ${address}`);
+      await interaction.reply({
+        content: removed ? `✅ Unblocked \`${address}\`.` : `\`${address}\` wasn't blocked.`,
+        ephemeral: true
+      });
+    }
+  } catch (error) {
+    console.error('Error handling slash command:', error);
+    await interaction.reply({ content: `❌ ${error.message}`, ephemeral: true }).catch(() => {});
+  }
 });
 
 
@@ -298,6 +502,52 @@ client.on('interactionCreate', async interaction => {
         embeds: [embed],
         components: [] // Remove buttons
       });
+
+    } else if (action === 'block' || action === 'unblock') {
+      const sender = await getNotificationSender(zohoMessageId, interaction.message);
+      if (!sender) {
+        await interaction.reply({ content: '❌ Could not work out the sender for this email.', ephemeral: true });
+        return;
+      }
+
+      // Zoho calls can be slow; acknowledge within Discord's 3 second window
+      await interaction.deferUpdate();
+      const embed = EmbedBuilder.from(interaction.message.embeds[0]);
+
+      if (action === 'block') {
+        await blockSender(sender, interaction.user.tag);
+        console.log(`🚫 ${interaction.user.tag} blocked ${sender}`);
+        const outcome = await discardEmail(zohoMessageId);
+
+        embed
+          .setColor(0xed4245)
+          .setFooter({ text: `🚫 Blocked ${sender}${outcome.spam ? ' · moved to Spam' : ''}` });
+        const undoRow = new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId(`unblock_${zohoMessageId}`)
+              .setLabel('Unblock Sender')
+              .setStyle(ButtonStyle.Secondary)
+              .setEmoji('↩️')
+          );
+        await interaction.editReply({ embeds: [embed], components: [undoRow] });
+
+      } else {
+        await unblockSender(sender);
+        console.log(`✅ ${interaction.user.tag} unblocked ${sender}`);
+        let notSpam = false;
+        try {
+          await setEmailSpam(zohoMessageId, 'markNotSpam');
+          notSpam = true;
+        } catch (error) {
+          console.error('❌ Failed to mark email as not spam:', error.response?.data?.status?.description || error.message);
+        }
+
+        embed
+          .setColor(0x0099ff)
+          .setFooter({ text: `↩️ Unblocked ${sender}${notSpam ? ' · marked Not spam' : ''}` });
+        await interaction.editReply({ embeds: [embed], components: [buildEmailButtons(zohoMessageId)] });
+      }
 
     } else if (action === 'reply') {
       // Get available from addresses
@@ -405,10 +655,13 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     console.error('Error handling interaction:', error);
-    await interaction.reply({
+    const errorReply = {
       content: 'An error occurred while processing your request.',
       ephemeral: true
-    });
+    };
+    // A deferred or answered interaction can't be replied to again
+    if (interaction.deferred || interaction.replied) await interaction.followUp(errorReply).catch(() => {});
+    else await interaction.reply(errorReply);
   }
 });
 
@@ -532,6 +785,38 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
+// Action buttons on an email notification
+function buildEmailButtons(zohoMessageId) {
+  return new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`markread_${zohoMessageId}`)
+        .setLabel('Mark as Read')
+        .setStyle(ButtonStyle.Success)
+        .setEmoji('✅'),
+      new ButtonBuilder()
+        .setCustomId(`reply_${zohoMessageId}`)
+        .setLabel('Reply')
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji('💬'),
+      new ButtonBuilder()
+        .setCustomId(`block_${zohoMessageId}`)
+        .setLabel('Block Sender')
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('🚫')
+    );
+}
+
+// Sender address for a notification: from the DB mapping, else parsed from the embed's From field
+async function getNotificationSender(zohoMessageId, message) {
+  const mapping = await dbGet('SELECT sender_email FROM email_mappings WHERE zoho_message_id = ?', [zohoMessageId]);
+  if (mapping?.sender_email) return normalizeEmail(mapping.sender_email);
+
+  const fromField = message.embeds[0]?.fields?.find(field => field.name === 'From')?.value || '';
+  const match = fromField.match(/\(([^()\s]+@[^()\s]+)\)\s*$/);
+  return match ? normalizeEmail(match[1]) : null;
+}
+
 // HTML cleaning function
 function cleanHtmlContent(html, summary) {
   if (!html) return summary || 'No content available';
@@ -617,6 +902,17 @@ app.post('/webhook/zoho', async (req, res) => {
       console.log(`📤 Skipping email from own address`);
       return res.status(200).json({ success: true, message: 'Own email ignored' });
     }
+
+    // Blocked senders: no Discord notification, mark read and move to Spam in Zoho
+    if (await isSenderBlocked(emailData.fromAddress)) {
+      const outcome = await discardEmail(emailData.messageId);
+      await dbRun(
+        'UPDATE blocked_senders SET blocked_count = blocked_count + 1, last_blocked_at = CURRENT_TIMESTAMP WHERE email_address = ?',
+        [normalizeEmail(emailData.fromAddress)]
+      );
+      console.log(`🚫 Blocked email from ${emailData.fromAddress} (read: ${outcome.read}, spam: ${outcome.spam})`);
+      return res.status(200).json({ success: true, message: 'Blocked sender ignored' });
+    }
     
     const emailContent = emailData.html || emailData.summary || 'No content available';
     const cleanContent = cleanHtmlContent(emailData.html, emailData.summary);
@@ -638,20 +934,7 @@ app.post('/webhook/zoho', async (req, res) => {
     const previewContent = `📧 **${senderName}**: ${subjectLine}`.substring(0, 300);
     const noMentions = { parse: [] };
 
-    // Create action buttons
-    const row = new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder()
-          .setCustomId(`markread_${emailData.messageId}`)
-          .setLabel('Mark as Read')
-          .setStyle(ButtonStyle.Success)
-          .setEmoji('✅'),
-        new ButtonBuilder()
-          .setCustomId(`reply_${emailData.messageId}`)
-          .setLabel('Reply')
-          .setStyle(ButtonStyle.Primary)
-          .setEmoji('💬')
-      );
+    const row = buildEmailButtons(emailData.messageId);
 
     // Send message via Discord bot
     if (client.user && process.env.DISCORD_CHANNEL_ID) {

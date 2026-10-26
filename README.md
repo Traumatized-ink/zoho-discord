@@ -19,6 +19,7 @@ A bidirectional email management system that allows you to:
 - ✅ **HTML Content Cleaning**: Removes CSS and displays clean email content
 - ✅ **Token Caching**: Prevents rate limiting with intelligent token management
 - ✅ **Outgoing Email Filter**: Only shows incoming emails, not your own sent emails
+- ✅ **Block Senders**: One-click block (with undo) moves the email to Spam; future emails from that sender are marked read, moved to Spam and never notified. `/blocks`, `/block` and `/unblock` manage the list
 
 ## Prerequisites
 
@@ -183,7 +184,7 @@ If webhooks aren't available:
 ### Receiving Emails
 When an email arrives in Zoho:
 1. **Discord notification** appears with email details
-2. **Interactive buttons** show: "Mark as Read" and "Reply"
+2. **Interactive buttons** show: "Mark as Read", "Reply" and "Block Sender"
 3. **Rich formatting** displays sender, subject, and content
 
 ### Mark as Read
@@ -196,6 +197,14 @@ When an email arrives in Zoho:
 2. **Modal popup** appears for composing reply
 3. **Type your response** and submit
 4. **Reply is sent** via Zoho Mail API
+
+### Block Senders
+1. **Click "🚫 Block Sender"**: the sender is added to the blocklist, and the email is marked read and moved to Spam in Zoho (Zoho's mark-as-spam also trains this mailbox's spam filter)
+2. **Click "↩️ Unblock Sender"** on the same message to undo: the sender is removed and the email is marked Not spam
+3. Later emails from a blocked sender are marked read and moved to Spam with **no Discord notification**
+4. Slash commands: `/blocks` lists blocked senders (with hit counts), `/block <address>` and `/unblock <address>` (autocompletes) manage the list
+
+Blocking only affects the connected mailbox, not other users in the Zoho organization. The blocklist lives in the SQLite database, so mount a persistent volume at `/app/data` or it is lost on redeploy.
 
 ## API Endpoints
 
