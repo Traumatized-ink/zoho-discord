@@ -803,7 +803,7 @@ function buildEmailButtons(zohoMessageId) {
         .setCustomId(`block_${zohoMessageId}`)
         .setLabel('Block Sender')
         .setStyle(ButtonStyle.Danger)
-        .setEmoji('🚫')
+        .setEmoji('✋')
     );
 }
 
